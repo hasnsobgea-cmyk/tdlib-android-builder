@@ -1,0 +1,47 @@
+name: Build AlSala Android TV Screensaver
+on:
+  push:
+    branches: [alsala-android-tv-screensaver-build]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Android build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Generate launcher icons
+        run: |
+          python3 - <<'PY'
+          import struct,zlib,pathlib
+          def make(path,w,h):
+              row=b'\0'+b'\x04\x19\x34' * w
+              data=b''.join(row for _ in range(h))
+              def chunk(t, b):
+                  return struct.pack('>I',len(b))+t+b+struct.pack('>I',zlib.crc32(t+b)&0xffffffff)
+              png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',w,h,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(data))+chunk(b'IEND',b'')
+              pathlib.Path(path).parent.mkdir(parents=True,exist_ok=True)
+              pathlib.Path(path).write_bytes(png)
+          make('app/src/main/res/drawable-nodpi/app_icon.png',192,192)
+          make('app/src/main/res/drawable-nodpi/tv_banner.png',320,180)
+          PY
+      - name: Assemble unsigned Android APK
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Prepare build artifacts
+        run: |
+          mkdir -p apk-out
+          cp app/build/outputs/apk/release/app-release-unsigned.apk apk-out/alsala-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" apk-out/apksigner.jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alsala-android-tv-build-tools
+          path: apk-out/*
+          retention-days: 5
